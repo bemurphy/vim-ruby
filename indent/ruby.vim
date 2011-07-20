@@ -90,7 +90,10 @@ let s:continuation_regex2 =
 
 " Regex that defines blocks.
 let s:block_regex =
-      \ '\%(\<do:\@!\>\|{\)\s*\%(|\%([*@]\=\h\w*,\=\s*\)\%(,\s*[*@]\=\h\w*\)*|\)\=\s*\%(#.*\)\=$'
+      \ '\%(\<do:\@!\>\|FIXME{\)\s*\%(|\%([*@]\=\h\w*,\=\s*\)\%(,\s*[*@]\=\h\w*\)*|\)\=\s*\%(#.*\)\=$'
+
+" Regex for closing a nested hash or array
+let s:nested_data = '^\s*[})\]]\s*,'
 
 " 2. Auxiliary Functions {{{1
 " ======================
@@ -146,7 +149,7 @@ function s:GetMSL(lnum)
     let line = getline(lnum)
     let col = match(line, s:continuation_regex2) + 1
     if (col > 0 && !s:IsInStringOrComment(lnum, col))
-	  \ || s:IsInString(lnum, strlen(line))
+          \ || s:IsInString(lnum, strlen(line))
       let msl = lnum
     else
       break
@@ -164,17 +167,17 @@ function s:FindRightmostOpenBracket(lnum)
   while pos != -1
     if !s:IsInStringOrComment(a:lnum, pos + 1)
       if line[pos] == '('
-	call add(open.parentheses, {'type': '(', 'pos': pos})
+        call add(open.parentheses, {'type': '(', 'pos': pos})
       elseif line[pos] == ')'
-	let open.parentheses = open.parentheses[0:-2]
+        let open.parentheses = open.parentheses[0:-2]
       elseif line[pos] == '{'
-	call add(open.braces, {'type': '{', 'pos': pos})
+        call add(open.braces, {'type': '{', 'pos': pos})
       elseif line[pos] == '}'
-	let open.braces = open.braces[0:-2]
+        let open.braces = open.braces[0:-2]
       elseif line[pos] == '['
-	call add(open.brackets, {'type': '[', 'pos': pos})
+        call add(open.brackets, {'type': '[', 'pos': pos})
       elseif line[pos] == ']'
-	let open.brackets = open.brackets[0:-2]
+        let open.brackets = open.brackets[0:-2]
       endif
     endif
     let pos = match(line, '[][(){}]', pos + 1)
@@ -229,9 +232,11 @@ function GetRubyIndent()
     let bs = strpart('(){}[]', stridx(')}]', line[col - 1]) * 2, 2)
     if searchpair(escape(bs[0], '\['), '', bs[1], 'bW', s:skip_expr) > 0
       if line[col-1]==')' && col('.') != col('$') - 1
-	let ind = virtcol('.') - 1
+        let ind = virtcol('.') - 1
+      elseif (line[col-1] == '}' || line[col-1] == ']') " && col('.') != col('$') - 1
+        let ind = indent(line('.'))
       else
-	let ind = indent(s:GetMSL(line('.')))
+        let ind = indent(s:GetMSL(line('.')))
       endif
     endif
     return ind
@@ -259,6 +264,8 @@ function GetRubyIndent()
     return ind
   endif
 
+
+
   " If we are in a multi-line string or line-comment, don't do anything to it.
   if s:IsInStringOrDocumentation(v:lnum, matchend(line, '^\s*') + 1)
     return indent('.')
@@ -285,6 +292,7 @@ function GetRubyIndent()
   let ind = indent(lnum)
 
   " If the previous line ended with a block opening, add a level of indent.
+  " This is breaking nested hashes
   if s:Match(lnum, s:block_regex)
     return indent(s:GetMSL(lnum)) + &sw
   endif
@@ -295,14 +303,14 @@ function GetRubyIndent()
     let open = s:FindRightmostOpenBracket(lnum)
     if open.pos != -1
       if open.type == '(' && searchpair('(', '', ')', 'bW', s:skip_expr) > 0
-	if col('.') + 1 == col('$')
-	  return ind + &sw
-	else
-	  return virtcol('.')
-	endif
+        if col('.') + 1 == col('$')
+          return ind + &sw
+        else
+          return virtcol('.')
+        endif
       else
-	let nonspace = matchend(line, '\S', open.pos + 1) - 1
-	return nonspace > 0 ? nonspace : ind + &sw
+        let nonspace = matchend(line, '\S', open.pos + 1) - 1
+        return nonspace > 0 ? nonspace : ind + &sw
       endif
     else
       call cursor(v:lnum, vcol)
@@ -372,7 +380,7 @@ function GetRubyIndent()
 
   " If the previous line ended with [*+/.-=], indent one extra level.
   if s:Match(lnum, s:continuation_regex)
-    if lnum == p_lnum
+    if lnum == p_lnum && !s:Match(lnum, s:nested_data)
       let ind = msl_ind + &sw
     else
       let ind = msl_ind
